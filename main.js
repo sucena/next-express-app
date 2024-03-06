@@ -1,44 +1,92 @@
-// Modules to control application life and create native browser window
-const {app, BrowserWindow} = require('electron')
-const path = require('path')
+const { app, BrowserWindow, BrowserView, ipcMain } = require("electron");
 
-function createWindow () {
-  // Create the browser window.
-  const mainWindow = new BrowserWindow({
-    width: 1000,
+ipcMain.on("perform-login", (event) => {
+  view.webContents.executeJavaScript(`
+      // Your existing login script
+  `);
+});
+
+let mainWindow;
+let view;
+
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 800,
     height: 600,
-    autoHideMenuBar: true,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js')
+      nodeIntegration: true,
+      contextIsolation: false, // Consider changing to true and using contextBridge in production
+      preload: __dirname + "/preload.js", // If using contextIsolation: true
     },
-  })
+  });
 
-  // and load the index.html of the app.
-  mainWindow.loadFile('index.html')
+  mainWindow.loadFile("index.html");
 
-  // Open the DevTools.
-  // mainWindow.webContents.openDevTools()
+  view = new BrowserView({
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+  });
+  mainWindow.setBrowserView(view);
+  view.setBounds({ x: 0, y: 100, width: 800, height: 500 }); // Adjusted to accommodate the overlay button
+  view.webContents.loadURL("https://enviosecommerce.ctt.pt");
+
+  mainWindow.on("resize", () => {
+    const { width, height } = mainWindow.getContentBounds();
+    view.setBounds({ x: 0, y: 100, width, height: height - 100 }); // Adjusted for the overlay
+  });
+
+  view.webContents.on("dom-ready", () => {
+    view.webContents.insertCSS("body { background-color: lightblue; }");
+  });
+
+  ipcMain.on("perform-login", (event) => {
+    // Execute login script when the "LOGIN" button is clicked
+    performLogin();
+  });
 }
 
-// This method will be called when Electron has finished
-// initialization and is ready to create browser windows.
-// Some APIs can only be used after this event occurs.
-app.whenReady().then(() => {
-  createWindow()
+function performLogin() {
+  view.webContents.executeJavaScript(`
+        (async () => {
+            const waitForElement = async (selector) => {
+                while (document.querySelector(selector) === null) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                }
+            };
 
-  app.on('activate', function () {
-    // On macOS it's common to re-create a window in the app when the
-    // dock icon is clicked and there are no other windows open.
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
-  })
-})
+            await waitForElement('#LoginName');
+            const usernameInput = document.querySelector('#LoginName');
+            usernameInput.value = 'MILDINDEXLDA';
 
-// Quit when all windows are closed, except on macOS. There, it's common
-// for applications and their menu bar to stay active until the user quits
-// explicitly with Cmd + Q.
-app.on('window-all-closed', function () {
-  if (process.platform !== 'darwin') app.quit()
-})
+            await waitForElement('#PassWord');
+            const passwordInput = document.querySelector('#PassWord');
+            passwordInput.value = 'pymkas-hikni9-Gicbah';
 
-// In this file you can include the rest of your app's specific main process
-// code. You can also put them in separate files and require them here.
+            await waitForElement('#loginbutton .loginsubmit');
+            const loginButton = document.querySelector('#loginbutton .loginsubmit');
+            loginButton.click();
+
+            // Check for login failure after a delay to allow for page response
+            setTimeout(async () => {
+                const errorElement = await document.getElementById('stderror');
+                if (errorElement) {
+                    mainWindow.webContents.send('login-failed');
+                } else {
+                    mainWindow.webContents.send('login-success');
+                }
+            }, 2000); // Adjust delay as needed
+        })();
+    `);
+}
+
+app.whenReady().then(createWindow);
+
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") app.quit();
+});
+
+app.on("activate", () => {
+  if (BrowserWindow.getAllWindows().length === 0) createWindow();
+});
